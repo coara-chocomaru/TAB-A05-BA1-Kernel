@@ -4935,7 +4935,7 @@ static int check_switch_lcm_mode_for_debug(void)
 	return 1;
 }
 
-#if defined(AUO_WUXGA_INCELL_DSI)
+#if defined(AUO_WUXGA_INCELL_DSI) || defined(KD_WUXGA_INCELL_DSI)
 extern int disp_lcm_resume_power(struct disp_lcm_handle *plcm);
 #endif
 
@@ -4962,7 +4962,7 @@ int primary_display_resume(void)
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_resume,
 		MMPROFILE_FLAG_PULSE, 0, 1);
 
-#if defined(AUO_WUXGA_INCELL_DSI)
+#if defined(AUO_WUXGA_INCELL_DSI) || defined(KD_WUXGA_INCELL_DSI)
 	disp_lcm_resume_power(pgc->plcm);
 #endif
 

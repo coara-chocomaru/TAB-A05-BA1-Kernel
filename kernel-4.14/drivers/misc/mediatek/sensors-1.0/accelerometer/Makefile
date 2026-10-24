@@ -9,3 +9,4 @@ obj-$(CONFIG_MTK_BMI160_I2C)   += bmi160-i2c/
 obj-$(CONFIG_MTK_MC3410_I2C) += mc3410-i2c/
 obj-$(CONFIG_MTK_MMA8X5X) += mma8x5x/
 obj-$(CONFIG_MTK_LIS2DH) += lis2dh/
+obj-$(CONFIG_MTK_LIS2DW) += lis2dw/

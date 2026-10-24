@@ -51,6 +51,8 @@
 #define C_I2C_FIFO_SIZE	 8
 /*----------------------------------------------------------------------------*/
 static const struct i2c_device_id lis3dh_i2c_id[] = {{LIS3DH_DEV_NAME, 0}, {} };
+static int lis2dh_init_flag = -1;
+
 /*the adapter id will be available in customization*/
 /* static struct i2c_board_info __initdata i2c_LIS3DH={ I2C_BOARD_INFO("LIS3DH", (0x32>>1))}; */
 
@@ -1623,6 +1625,8 @@ static int lis3dh_i2c_probe(struct i2c_client *client, const struct i2c_device_i
 		goto exit_kfree;
 	}
 
+	lis2dh_init_flag = 0;
+
 	GSE_LOG("%s: OK\n", __func__);
 	return 0;
 
@@ -1634,6 +1638,7 @@ exit_init_failed:
 exit_kfree:
 	kfree(obj);
 exit:
+	lis2dh_init_flag = -1;
 	GSE_ERR("%s: err = %d\n", __func__, err);
 	return err;
 }
@@ -1658,6 +1663,12 @@ static int lis3dh_probe(void)
 	GSE_FUN();
 	if (i2c_add_driver(&lis3dh_i2c_driver)) {
 		GSE_ERR("add driver error\n");
+		return -1;
+	}
+
+	if(lis2dh_init_flag == -1)
+	{
+		GSE_ERR("%s init failed!\n", __FUNCTION__);
 		return -1;
 	}
 	return 0;

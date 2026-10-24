@@ -754,6 +754,10 @@ static void charger_check_status(struct mt_charger *mt_chg)
 extern void set_charger_mode(int enable);
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_FTS
+extern int fts_charger_mode_set(int on);
+#endif
+
 static int charger_routine_thread(void *data)
 {
 	struct mt_charger *mt_chg = data;
@@ -798,6 +802,9 @@ static int charger_routine_thread(void *data)
 			#ifdef CONFIG_TOUCHSCREEN_NT36XXX
 				set_charger_mode(0);
 			#endif
+			#ifdef CONFIG_TOUCHSCREEN_FTS
+				fts_charger_mode_set(0);
+			#endif
 				chg_ini = false;
 				gpio_direction_output(mt_chg->chgled_gpio, 0);
 				__pm_relax(&charger_wakelock);
@@ -805,6 +812,9 @@ static int charger_routine_thread(void *data)
 			else {
 			#ifdef CONFIG_TOUCHSCREEN_NT36XXX
 				set_charger_mode(1);
+			#endif
+			#ifdef CONFIG_TOUCHSCREEN_FTS
+				fts_charger_mode_set(1);
 			#endif
 				if(mt_chg->bat_soc < 100 && get_charger_stat())
 					gpio_direction_output(mt_chg->chgled_gpio, 1);

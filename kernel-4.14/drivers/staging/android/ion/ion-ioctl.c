@@ -102,11 +102,11 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	{
 		struct ion_handle *handle;
 
-		handle = ion_alloc(
+		handle = __ion_alloc(
 						client, data.allocation.len,
 						data.allocation.align,
 						data.allocation.heap_id_mask,
-						data.allocation.flags);
+						data.allocation.flags, true);
 		if (IS_ERR(handle)) {
 			IONMSG(
 				"ION_IOC_ALLOC handle is invalid. ret = %d.\n",
@@ -114,10 +114,9 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return PTR_ERR(handle);
 		}
 
-		pass_to_user(handle);
 		data.allocation.handle = handle->id;
-
 		cleanup_handle = handle;
+		pass_to_user(handle);
 		break;
 	}
 	case ION_IOC_FREE:
@@ -174,11 +173,12 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			       data.fd.fd, ret);
 			return ret;
 		} else {
+			data.handle.handle = handle->id;
 			handle = pass_to_user(handle);
-			if (IS_ERR(handle))
+			if (IS_ERR(handle)) {
 				ret = PTR_ERR(handle);
-			else
-				data.handle.handle = handle->id;
+				data.handle.handle = 0;
+			}
 		}
 		break;
 	}
@@ -209,6 +209,7 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			if (cleanup_handle) {
 				mutex_lock(&client->lock);
 				user_ion_free_nolock(client, cleanup_handle);
+				ion_handle_put_nolock(cleanup_handle);
 				mutex_unlock(&client->lock);
 			}
 			IONMSG(
@@ -217,5 +218,7 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		}
 	}
+	if (cleanup_handle)
+		ion_handle_put(cleanup_handle);
 	return ret;
 }

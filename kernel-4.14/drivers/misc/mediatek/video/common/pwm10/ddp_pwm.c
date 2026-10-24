@@ -18,6 +18,8 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/atomic.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 /* #include <mach/mt_reg_base.h> */
 #ifdef CONFIG_MTK_CLKMGR
 #include <mach/mt_clkmgr.h>
@@ -143,6 +145,8 @@ static bool g_pwm_first_config[PWM_TOTAL_MODULE_NUM];
 #endif		/* CONFIG_FPGA_EARLY_PORTING */
 static int g_pwm_log_num = PWM_LOG_BUFFER_SIZE;
 
+static unsigned int GPIO_LCD_BL_EN = 0;
+
 int disp_pwm_get_cust_led(unsigned int *clocksource, unsigned int *clockdiv)
 {
 	struct device_node *led_node = NULL;
@@ -175,6 +179,9 @@ int disp_pwm_get_cust_led(unsigned int *clocksource, unsigned int *clockdiv)
 				PWM_ERR("led dts can not get led mode data.\n");
 			}
 		}
+		GPIO_LCD_BL_EN = of_get_named_gpio(led_node, "gpio_lcd_bl_en", 0);
+		if (GPIO_LCD_BL_EN > 0)
+			gpio_request(GPIO_LCD_BL_EN, "GPIO_LCD_BL_EN");
 	}
 
 	if (ret)
@@ -371,8 +378,6 @@ enum disp_pwm_id_t disp_pwm_get_main(void)
 	return g_pwm_main_id;
 }
 
-extern void sts_lcd_backlight_enable(bool on);
-
 #ifndef CONFIG_FPGA_EARLY_PORTING
 static void disp_pwm_set_drverIC_en(enum disp_pwm_id_t id, int enabled)
 {
@@ -387,10 +392,13 @@ static void disp_pwm_set_drverIC_en(enum disp_pwm_id_t id, int enabled)
 			mt_set_gpio_out(GPIO_LCM_LED_EN, GPIO_OUT_ZERO);
 	}
 #endif
-	if (enabled)
-		sts_lcd_backlight_enable(true);
-	else
-		sts_lcd_backlight_enable(false);
+
+	if (GPIO_LCD_BL_EN > 0) {
+		if(enabled)
+			gpio_direction_output(GPIO_LCD_BL_EN, 1);
+		else
+			gpio_direction_output(GPIO_LCD_BL_EN, 0);
+	}
 }
 
 static void disp_pwm_set_enabled(struct cmdqRecStruct *cmdq,

@@ -41,7 +41,19 @@ ROOT_NODE {
 		gpio_lcd_rst = <&pio 20 0>;
 		gpio_lcd_pwr = <&pio 127 0>;
 		gpio_lcd_pwr2 = <&pio 122 0>;
+		gpio_lcd_pwr3 = <&pio 123 0>;
 		gpio_lcd_bl_en = <&pio 119 0>;
+		reg-lcm-supply = <&mt_pmic_vsim1_ldo_reg>;
+	};
+
+	panel2: panel@1 {
+		compatible = "mediatek,kd_wuxga_incell_dsi";
+		gpio_lcd_rst = <&pio 20 0>;
+		gpio_lcd_pwr = <&pio 127 0>;
+		gpio_lcd_pwr2 = <&pio 122 0>;
+		gpio_lcd_pwr3 = <&pio 123 0>;
+		gpio_lcd_bl_en = <&pio 119 0>;
+		gpio_tp_rst = <&pio 79 0>;
 		reg-lcm-supply = <&mt_pmic_vsim1_ldo_reg>;
 	};
 
@@ -268,6 +280,16 @@ ROOT_NODE {
 	pinctrl-0 = <&i2c3_pins>;
 	clock-frequency = <370000>;
 	status = "okay";
+
+	cap_touch@38 {
+		compatible = "mediatek,cap_touch";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x38>;
+		interrupt-parent = <&pio>;
+		interrupts = <78 IRQ_TYPE_EDGE_FALLING>;
+		int-gpio = <&pio 78 0>;
+	};
 
 	novatek_touch@62 {
 		compatible = "novatek,NVT-ts";
@@ -1869,14 +1891,14 @@ ROOT_NODE {
 };
 
 &touch {
-	vtouch-supply = <&mt_pmic_vcn33_bt_ldo_reg>;
-	tpd-resolution = <800 1280>;
+	vtouch-supply = <&mt_pmic_vsim1_ldo_reg>;
+	tpd-resolution = <1920 1080>;
 	use-tpd-button = <0>;
 	tpd-key-num = <3>;
 	tpd-key-local= <139 172 158 0>;
 	tpd-key-dim-local = <90 883 100 40 230 883
 		100 40 370 883 100 40 0 0 0 0>;
-	tpd-max-touch-num = <5>;
+	tpd-max-touch-num = <10>;
 	tpd-filter-enable = <1>;
 	tpd-filter-pixel-density = <124>;
 	tpd-filter-custom-prameters = <0 0 0 0 0 0 0 0 0 0 0 0>;
@@ -1890,7 +1912,9 @@ ROOT_NODE {
 	pinctrl-3 = <&CTP_pins_eint_output1>;
 	pinctrl-4 = <&CTP_pins_rst_output0>;
 	pinctrl-5 = <&CTP_pins_rst_output1>;
-	status = "disabled";
+	interrupt-parent = <&pio>;
+	interrupts = <78 IRQ_TYPE_EDGE_FALLING>;
+	status = "okay";
 };
 
 &u3phy0 {
@@ -1907,4 +1931,5 @@ ROOT_NODE {
 
 &led6 {
 	maxlevel = <1023>;
+	gpio_lcd_bl_en = <&pio 119 0>;
 };

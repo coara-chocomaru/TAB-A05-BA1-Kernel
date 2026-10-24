@@ -134,4 +134,12 @@ config TOUCHSCREEN_NT36XXX
 
 	  If unsure, say N.
 
+config TOUCHSCREEN_FTS
+	bool "TOUCHSCREEN_FTS"
+	help
+	  Say Y here if you have a TOUCHSCREEN_FTS touchscreen connected
+	  to your system.
+
+	  If unsure, say N.
+
 endif

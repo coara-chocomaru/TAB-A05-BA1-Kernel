@@ -68,11 +68,12 @@ static struct regulator *lcm_vgp;
 
 static unsigned int GPIO_LCD_PWR;
 static unsigned int GPIO_LCD_PWR2;
+static unsigned int GPIO_LCD_PWR3;
 static unsigned int GPIO_LCD_BL_EN;
 static unsigned int GPIO_LCD_RST;
 
 /* get LDO supply */
-static int lcm_get_vgp_supply(struct device *dev)
+static int auo_lcm_get_vgp_supply(struct device *dev)
 {
 	int ret;
 	struct regulator *lcm_vgp_ldo;
@@ -97,7 +98,7 @@ static int lcm_get_vgp_supply(struct device *dev)
 	return ret;
 }
 
-int lcm_vgp_supply_enable(void)
+static int auo_lcm_vgp_supply_enable(void)
 {
 	int ret;
 	unsigned int volt;
@@ -132,7 +133,7 @@ int lcm_vgp_supply_enable(void)
 	return ret;
 }
 
-int lcm_vgp_supply_disable(void)
+static int auo_lcm_vgp_supply_disable(void)
 {
 	int ret = 0;
 	unsigned int isenable;
@@ -171,6 +172,10 @@ static int lcm_get_gpio(struct device *dev)
 	gpio_request(GPIO_LCD_PWR2, "GPIO_LCD_PWR2");
 	pr_err("[Kernel/LCM] GPIO_LCD_PWR2 = 0x%x\n", GPIO_LCD_PWR2);
 
+	GPIO_LCD_PWR3 = of_get_named_gpio(dev->of_node, "gpio_lcd_pwr3", 0);
+	gpio_request(GPIO_LCD_PWR3, "GPIO_LCD_PWR3");
+	pr_err("[Kernel/LCM] GPIO_LCD_PWR3 = 0x%x\n", GPIO_LCD_PWR3);
+
 	GPIO_LCD_BL_EN = of_get_named_gpio(dev->of_node, "gpio_lcd_bl_en", 0);
 	gpio_request(GPIO_LCD_BL_EN, "GPIO_LCD_BL_EN");
 	pr_err("[Kernel/LCM] GPIO_LCD_BL_EN = 0x%x\n", GPIO_LCD_BL_EN);
@@ -188,8 +193,8 @@ static int lcm_gpio_probe(struct platform_device *pdev)
 	pr_err("Kernel/LCM: %s start \n",__func__);
 
 	lcm_get_gpio(dev);
-	lcm_get_vgp_supply(dev);
-	lcm_vgp_supply_enable();
+	auo_lcm_get_vgp_supply(dev);
+	auo_lcm_vgp_supply_enable();
 	return 0;
 }
 
@@ -1098,12 +1103,15 @@ static void lcm_init_power(void)
 	lcm_set_gpio_output(GPIO_LCD_PWR, GPIO_OUT_ONE);
 	MDELAY(2);
 	lcm_set_gpio_output(GPIO_LCD_PWR2, GPIO_OUT_ONE);
+	MDELAY(10);
+	lcm_set_gpio_output(GPIO_LCD_PWR3, GPIO_OUT_ONE);
 }
 
 static void lcm_suspend_power(void)
 {
 	pr_err("[Kernel/LCM] lcm_suspend_power() enter\n");
 
+//	lcm_set_gpio_output(GPIO_LCD_PWR3, GPIO_OUT_ZERO);
 //	lcm_set_gpio_output(GPIO_LCD_PWR2, GPIO_OUT_ZERO);
 	MDELAY(2);
 //	lcm_set_gpio_output(GPIO_LCD_PWR, GPIO_OUT_ZERO);
@@ -1113,10 +1121,12 @@ static void lcm_suspend_power(void)
 static void lcm_resume_power(void)
 {
 	pr_err("[Kernel/LCM] lcm_resume_power() enter\n");
-	lcm_vgp_supply_enable();
+	auo_lcm_vgp_supply_enable();
 	lcm_set_gpio_output(GPIO_LCD_PWR, GPIO_OUT_ONE);
 	MDELAY(2);
 	lcm_set_gpio_output(GPIO_LCD_PWR2, GPIO_OUT_ONE);
+	MDELAY(10);
+	lcm_set_gpio_output(GPIO_LCD_PWR3, GPIO_OUT_ONE);
 	MDELAY(100);
 }
 
@@ -1244,11 +1254,12 @@ static void lcm_suspend(void)
 	MDELAY(120);
 
 	lcm_set_gpio_output(GPIO_LCD_RST, GPIO_OUT_ZERO);
+	lcm_set_gpio_output(GPIO_LCD_PWR3, GPIO_OUT_ZERO);
 	lcm_set_gpio_output(GPIO_LCD_PWR2, GPIO_OUT_ZERO);
 	MDELAY(2);
 	lcm_set_gpio_output(GPIO_LCD_PWR, GPIO_OUT_ZERO);
 	MDELAY(150);
-	lcm_vgp_supply_disable();
+	auo_lcm_vgp_supply_disable();
 	MDELAY(100);
 
 	pr_err("[Kernel/LCM] lcm_suspend() enter\n");
@@ -1279,18 +1290,6 @@ static void lcm_resume(void)
 	MDELAY(33);
 }
 
-void sts_lcd_backlight_enable(bool on)
-{
-	if(on)
-	{
-		lcm_set_gpio_output(GPIO_LCD_BL_EN, GPIO_OUT_ONE);
-	}
-	else
-	{
-		lcm_set_gpio_output(GPIO_LCD_BL_EN, GPIO_OUT_ZERO);
-	}
-}
-
 struct LCM_DRIVER auo_wuxga_incell_dsi_lcm_drv = {
     .name		= "auo_wuxga_incell_dsi",
 	.set_util_funcs = lcm_set_util_funcs,
@@ -1300,5 +1299,5 @@ struct LCM_DRIVER auo_wuxga_incell_dsi_lcm_drv = {
 	.resume         = lcm_resume,
 	.init_power		= lcm_init_power,
 	.resume_power 	= lcm_resume_power,
-	.suspend_power 	= lcm_suspend_power,
+	.suspend_power  = lcm_suspend_power,
 };
