@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build
 
 on:
   push:
@@ -7,52 +7,134 @@ on:
   pull_request:
     branches:
       - master
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TOP: ${{ github.workspace }}
+  KERNEL_OUT: ${{ github.workspace }}/kernel-4.14/out
+  MTK_PLATFORM: mt8168
+  ARCH: arm64
+  CROSS_COMPILE: aarch64-linux-gnu-
+  KERNEL_DIR: kernel-4.14
+  KBUILD_OUTPUT: out
+  DEFCONFIG: a05ba_defconfig
+  WERROR: "0"
+  KCFLAGS: -DPLE_GROUP_DBDC_SIZE=512 -Wno-error -Wno-error=pointer-compare -Wno-pointer-compare -Wno-error=misleading-indentation -Wno-misleading-indentation -Wno-error=restrict -Wno-restrict -Wno-error=stringop-overflow -Wno-stringop-overflow -Wno-error=memset-elt-size -Wno-memset-elt-size -Wno-error=sizeof-array-div -Wno-sizeof-array-div -Wno-error=sizeof-pointer-memaccess -Wno-sizeof-pointer-memaccess -Wno-maybe-uninitialized -Wno-array-bounds -Wno-address-of-packed-member -Wno-missing-attributes -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-unused-result -Wno-unused-variable -Wno-unused-function -Wno-return-type -Wno-error=return-type -fno-pie -fno-stack-protector
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:20.04
+  build-kernel:
+    name: Kernel Build - ARM64 (a05ba_defconfig)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: deconf
-      run: |
-       apt-get update
-       apt-get install -y \
-       debconf-utils
-       
-    - name: Preseed tzdata for Tokyo
-      run: |
-       echo "tzdata tzdata/Areas select Asia" | debconf-set-selections
-       echo "tzdata tzdata/Zones/Asia select Tokyo" | debconf-set-selections
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
-    - name: tzdata
-      run: |
-       apt-get install -y tzdata \
-            --no-install-recommends \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold"
-      
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            make python3 git curl
 
-    - name: Set up APT packages
-      run: |
-        apt-get update
-        apt-get install -y \
-        git gnupg flex bison gperf build-essential zip curl \
-        zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev \
-        x11proto-core-dev libx11-dev lib32z-dev ccache libgl1-mesa-dev \
-        libxml2-utils xsltproc unzip python lib32z1 lib32stdc++6 libssl-dev \
-        libswitch-perl swig maven libncurses5 xxd bc vim
+      - name: Verify kernel source directory
+        run: |
+          set -euo pipefail
+          if [ ! -d "$KERNEL_DIR" ]; then
+            echo "Error: $KERNEL_DIR directory not found"
+            exit 1
+          fi
 
-    - name: Execute build script
-      run: |
-        chmod +x ./build_kernel.sh
-        ./build_kernel.sh output
+      - name: Show kernel version
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euo pipefail
+          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" kernelversion
 
-    - name: Upload build output
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-output
-        path: ./output
+      - name: Configure kernel
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$KBUILD_OUTPUT"
+          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" "$DEFCONFIG"
+
+      - name: Fix DTC yylloc multiple definition
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euo pipefail
+          rm -f scripts/dtc/dtc-lexer.lex.c scripts/dtc/dtc-parser.tab.c scripts/dtc/dtc-parser.tab.h
+          sed -i 's/^[[:space:]]*YYLTYPE yylloc;[[:space:]]*$/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
+
+      - name: Fix SELinux classmap error
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euo pipefail
+          sed -i '/#error New address family defined, please update secclass_map\./s/#error/#warning/' security/selinux/include/classmap.h
+
+      - name: Build kernel image and dtbs
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euo pipefail
+          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" -j"$(nproc)" KCFLAGS="$KCFLAGS" Image.gz dtbs
+
+      - name: List generated artifacts
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euo pipefail
+          ls -lh "$KBUILD_OUTPUT/arch/arm64/boot/" || true
+          find "$KBUILD_OUTPUT/arch/arm64/boot/dts" -name "*.dtb" | head -n 200 || true
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-4.14-arm64-a05ba_defconfig
+          path: |
+            kernel-4.14/out/arch/arm64/boot/Image.gz
+            kernel-4.14/out/arch/arm64/boot/Image
+            kernel-4.14/out/arch/arm64/boot/dts/**/*.dtb
+            kernel-4.14/out/.config
+            kernel-4.14/out/System.map
+            kernel-4.14/out/vmlinux
+          retention-days: 30
+          compression-level: 6
+          include-hidden-files: true
+
+      - name: Upload artifacts to Release
+        uses: softprops/action-gh-release@v2
+        if: github.event_name != 'pull_request'
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Kernel Build - ${{ github.run_number }}"
+          draft: false
+          prerelease: false
+          files: |
+            kernel-4.14/out/arch/arm64/boot/Image.gz
+            kernel-4.14/out/arch/arm64/boot/Image
+            kernel-4.14/out/arch/arm64/boot/dts/**/*.dtb
+            kernel-4.14/out/.config
+            kernel-4.14/out/System.map
+            kernel-4.14/out/vmlinux
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-kernel-4.14
+          path: |
+            kernel-4.14/out/.config
+            kernel-4.14/out/.config.old
+            kernel-4.14/out/.config.bak
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Build summary
+        if: always()
+        run: echo "Kernel build completed (arm64, a05ba_defconfig)"
