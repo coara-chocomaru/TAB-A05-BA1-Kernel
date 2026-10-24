@@ -65,6 +65,23 @@ jobs:
           mkdir -p "$KBUILD_OUTPUT"
           make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" "$DEFCONFIG"
 
+      - name: Disable broken connmark configs
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euo pipefail
+          # xt_connmark.c は v1 API (xt_connmark_tginfo1 / XT_CONNMARK_SET /
+          # xt_connmark_mtinfo1 等) を使用しているが、このツリーの
+          # include/uapi/linux/netfilter/xt_connmark.h には v1 定義が
+          # 含まれていないためコンパイルエラーとなる。
+          # CONNMARK target / match は本CIの用途(ブラウザ端末向けカーネル)
+          # には不要のため、該当コンフィグを無効化してビルドを回避する。
+          "$PWD/scripts/config" --file "$KBUILD_OUTPUT/.config" \
+            --disable NETFILTER_XT_TARGET_CONNMARK \
+            --disable NETFILTER_XT_MATCH_CONNMARK
+          # 無効化後の.configを依存関係に沿って正規化
+          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" \
+            TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" olddefconfig
+
       - name: Fix DTC yylloc multiple definition
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
