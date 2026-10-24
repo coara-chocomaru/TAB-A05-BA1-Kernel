@@ -1,4 +1,4 @@
-name: Build
+name: Build Kernel
 
 on:
   push:
@@ -7,367 +7,52 @@ on:
   pull_request:
     branches:
       - master
-  workflow_dispatch:
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  TOP: ${{ github.workspace }}
-  KERNEL_OUT: ${{ github.workspace }}/kernel-4.14/out
-  MTK_PLATFORM: mt8168
-  MTK_WLAN_CHIP: CONSYS_MT8168
-  MTK_WLAN_PATH_SET: siso
-  MTK_COMBO_CHIP: CONNAC2X2
-  WLAN_CHIP_ID: 8168
-  CONFIG_MTK_COMBO_CHIP_CONSYS_8168: y
-  CONFIG_MTK_COMBO_BT: y
-  CONFIG_MTK_COMBO_WIFI_HIF: sdio
-  ARCH: arm64
-  CROSS_COMPILE: aarch64-linux-gnu-
-  KERNEL_DIR: kernel-4.14
-  KBUILD_OUTPUT: out
-  DEFCONFIG: a05ba_defconfig
-  AUTOCONF_H: ${{ github.workspace }}/kernel-4.14/out/include/generated/autoconf.h
-  WERROR: "0"
-  KCFLAGS: -DPLE_GROUP_DBDC_SIZE=512 -Wno-error -Wno-error=pointer-compare -Wno-pointer-compare -Wno-error=misleading-indentation -Wno-misleading-indentation -Wno-error=restrict -Wno-restrict -Wno-error=stringop-overflow -Wno-stringop-overflow -Wno-error=memset-elt-size -Wno-memset-elt-size -Wno-error=sizeof-array-div -Wno-sizeof-array-div -Wno-error=sizeof-pointer-memaccess -Wno-sizeof-pointer-memaccess -Wno-maybe-uninitialized -Wno-array-bounds -Wno-address-of-packed-member -Wno-missing-attributes -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-unused-result -Wno-unused-variable -Wno-unused-function -Wno-return-type -Wno-error=return-type -fno-pie -fno-stack-protector
 
 jobs:
-  build-kernel:
-    name: Kernel Build - ARM64 (a05ba_defconfig)
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: deconf
+      run: |
+       apt-get update
+       apt-get install -y \
+       debconf-utils
+       
+    - name: Preseed tzdata for Tokyo
+      run: |
+       echo "tzdata tzdata/Areas select Asia" | debconf-set-selections
+       echo "tzdata tzdata/Zones/Asia select Tokyo" | debconf-set-selections
 
-      - name: Install build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential bc bison flex libssl-dev libelf-dev \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            make python3 git curl ccache kmod
+    - name: tzdata
+      run: |
+       apt-get install -y tzdata \
+            --no-install-recommends \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"
+      
 
-      - name: Verify kernel source directory
-        run: |
-          set -euo pipefail
-          if [ ! -d "$KERNEL_DIR" ]; then
-            echo "Error: $KERNEL_DIR directory not found"
-            exit 1
-          fi
+    - name: Set up APT packages
+      run: |
+        apt-get update
+        apt-get install -y \
+        git gnupg flex bison gperf build-essential zip curl \
+        zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev \
+        x11proto-core-dev libx11-dev lib32z-dev ccache libgl1-mesa-dev \
+        libxml2-utils xsltproc unzip python lib32z1 lib32stdc++6 libssl-dev \
+        libswitch-perl swig maven libncurses5 xxd bc vim
 
-      - name: Show kernel version
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" kernelversion
+    - name: Execute build script
+      run: |
+        chmod +x ./build_kernel.sh
+        ./build_kernel.sh output
 
-      - name: Configure kernel
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$KBUILD_OUTPUT"
-          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" "$DEFCONFIG"
-
-      - name: Fix DTC yylloc multiple definition
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          rm -f scripts/dtc/dtc-lexer.lex.c scripts/dtc/dtc-parser.tab.c scripts/dtc/dtc-parser.tab.h
-          sed -i 's/^[[:space:]]*YYLTYPE yylloc;[[:space:]]*$/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
-
-      - name: Fix SELinux classmap error
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          sed -i '/#error New address family defined, please update secclass_map\./s/#error/#warning/' security/selinux/include/classmap.h
-
-      - name: Patch MediaTek pointer compare
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          target="../vendor/mediatek/kernel_modules/connectivity/common/common_main/linux/wmt_step.c"
-          if [ ! -f "$target" ]; then
-            echo "Error: $target not found"
-            exit 1
-          fi
-          sed -i "s/str == NULL || str == '\\\\0'/str == NULL || *str == '\\\\0'/" "$target"
-
-      - name: Fix WLAN compile errors for mt8168
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-
-          find ../vendor/mediatek/kernel_modules -name "Makefile" -o -name "Kbuild" -o -name "*.make" | \
-            xargs sed -i '/ifeq[[:space:]]*(\$(KBUILD_MODPOST_FAIL_ON_WARNINGS)/,/^endif/d' || true
-
-          find ../vendor/mediatek/kernel_modules -name "Makefile" -o -name "Kbuild" -o -name "*.make" | \
-            xargs sed -i '/KBUILD_MODPOST_FAIL_ON_WARNINGS/d' || true
-
-          target="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/Makefile"
-          if [ -f "$target" ]; then
-            sed -i 's/^ccflags-y += -Werror[[:space:]]*$/ccflags-y += -Wno-error/' "$target"
-            sed -i 's/^ccflags-y += -Werror \(.*\)$/ccflags-y += -Wno-error \1/' "$target"
-          fi
-
-          target="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/common/wlan_lib.c"
-          if [ -f "$target" ]; then
-            sed -i 's/PLE_GROUP0_SIZE/512/g' "$target"
-            sed -i 's/PLE_GROUP1_SIZE/256/g' "$target"
-            sed -i 's/HIF_MSDU_REPORT_DUMP_TIMEOUT/100/g' "$target"
-          fi
-
-          target="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/nic/nic_tx.c"
-          if [ -f "$target" ]; then
-            sed -i 's/TX_RING_DATA1_IDX_1/TX_RING_DATA1_IDX/g' "$target"
-            sed -i '1i#define TX_RING_DATA1_IDX 1' "$target"
-            sed -i '1i#define TX_RING_DATA0_IDX 0' "$target"
-          fi
-
-          target="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/linux/gl_init.c"
-          if [ -f "$target" ]; then
-            sed -i 's/\<gprWdev->netdev\>/gprWdev[0]->netdev/g' "$target"
-            sed -i 's/\<prWdev->netdev\>/gprWdev[0]->netdev/g' "$target"
-          fi
-
-          target="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/linux/hif/sdio/sdio.c"
-          if [ -f "$target" ]; then
-            sed -i 's/mt66xx_driver_data_mt6632/mt66xx_driver_data_connac2x2/g' "$target"
-          fi
-
-          target="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/linux/hif/sdio/hal_api.c"
-          if [ -f "$target" ]; then
-            sed -i '1i#define TX_RING_DATA0_IDX_0 0' "$target"
-            sed -i '1i#define TX_RING_DATA0_IDX 0' "$target"
-            python3 - << 'PYEOF'
-          import os
-          target = "../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/linux/hif/sdio/hal_api.c"
-          with open(target) as f:
-              lines = f.readlines()
-          in_func = False
-          depth = 0
-          result = []
-          for line in lines:
-              code = line.split('//')[0]
-              opens = code.count('{')
-              closes = code.count('}')
-              if not in_func and 'halHifSwInfoInit' in line and '{' in line:
-                  in_func = True
-              if in_func:
-                  new_depth = depth + opens - closes
-                  if depth > 0 and new_depth == 0:
-                      result.append('\treturn 0;\n')
-                      in_func = False
-                  depth = new_depth
-              result.append(line)
-          with open(target, 'w') as f:
-              f.writelines(result)
-          PYEOF
-          fi
-
-          common_hif="../vendor/mediatek/kernel_modules/connectivity/common/common_main/linux/hif_sdio.c"
-          if [ -f "$common_hif" ]; then
-            if grep -q "mtk_wcn_hif_sdio_f0_readb" "$common_hif" && ! grep -q "EXPORT_SYMBOL(mtk_wcn_hif_sdio_f0_readb)" "$common_hif"; then
-              echo "EXPORT_SYMBOL(mtk_wcn_hif_sdio_f0_readb);" >> "$common_hif"
-            fi
-          fi
-
-          stub_dir="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/linux/hif/sdio"
-          if [ -d "$stub_dir" ]; then
-            cat > "$stub_dir/hal_weak_stubs.c" << 'CEOF'
-          #include <linux/kernel.h>
-          void __weak halDumpTxdInfo(void *prAdapter, unsigned int u4Idx)
-          {
-          	(void)prAdapter;
-          	(void)u4Idx;
-          }
-          int __weak mtk_wcn_hif_sdio_f0_readb(unsigned char func_num,
-          				      unsigned int offset,
-          				      unsigned char *pbuf)
-          {
-          	(void)func_num;
-          	(void)offset;
-          	(void)pbuf;
-          	return 0;
-          }
-          CEOF
-
-            python3 - << 'PYEOF'
-          makefile = "../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/Makefile"
-          with open(makefile) as f:
-              lines = f.readlines()
-          new_lines = []
-          in_sdio_block = False
-          stub_patched = False
-          for line in lines:
-              if "ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), sdio)" in line:
-                  in_sdio_block = True
-              if in_sdio_block and not stub_patched and "$(HIF_DIR)hal_api.o" in line:
-                  stripped = line.rstrip('\n').rstrip()
-                  new_lines.append(stripped + ' \\\n')
-                  new_lines.append('             $(HIF_DIR)hal_weak_stubs.o\n')
-                  in_sdio_block = False
-                  stub_patched = True
-                  continue
-              new_lines.append(line)
-          with open(makefile, 'w') as f:
-              f.writelines(new_lines)
-          PYEOF
-          fi
-
-      - name: Prepare kernel headers
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" modules_prepare
-
-      - name: Build kernel image, dtbs, and modules
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" MTK_WLAN_CHIP="$MTK_WLAN_CHIP" MTK_WLAN_PATH_SET="$MTK_WLAN_PATH_SET" MTK_COMBO_CHIP="$MTK_COMBO_CHIP" WLAN_CHIP_ID="$WLAN_CHIP_ID" CONFIG_MTK_COMBO_CHIP_CONSYS_8168="$CONFIG_MTK_COMBO_CHIP_CONSYS_8168" CONFIG_MTK_COMBO_BT="$CONFIG_MTK_COMBO_BT" CONFIG_MTK_COMBO_WIFI_HIF="$CONFIG_MTK_COMBO_WIFI_HIF" WERROR="$WERROR" -j"$(nproc)" KCFLAGS="$KCFLAGS" Image.gz dtbs modules
-
-      - name: Build vendor kernel modules
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          export AUTOCONF_H="$AUTOCONF_H"
-          export TOP="$TOP"
-          export MTK_PLATFORM="$MTK_PLATFORM"
-          export MTK_WLAN_CHIP="$MTK_WLAN_CHIP"
-          export MTK_WLAN_PATH_SET="$MTK_WLAN_PATH_SET"
-          export MTK_COMBO_CHIP="$MTK_COMBO_CHIP"
-          export WLAN_CHIP_ID="$WLAN_CHIP_ID"
-          export CONFIG_MTK_COMBO_CHIP_CONSYS_8168="$CONFIG_MTK_COMBO_CHIP_CONSYS_8168"
-          export CONFIG_MTK_COMBO_BT="$CONFIG_MTK_COMBO_BT"
-          export CONFIG_MTK_COMBO_WIFI_HIF="$CONFIG_MTK_COMBO_WIFI_HIF"
-          export KERNEL_OUT="$KERNEL_OUT"
-
-          build_module() {
-            local mod_dir="$1"
-            local extra_symvers="${2:-}"
-            local extra_vars="${3:-}"
-            local force="${4:-0}"
-
-            if [ ! -d "$mod_dir" ]; then return 0; fi
-            if [ ! -f "$mod_dir/Makefile" ] && [ ! -f "$mod_dir/Kbuild" ]; then return 0; fi
-
-            if [ "$force" != "1" ]; then
-              if ! grep -Eq '^[[:space:]]*obj-' "$mod_dir/Makefile" 2>/dev/null && ! grep -Eq '^[[:space:]]*obj-' "$mod_dir/Kbuild" 2>/dev/null; then
-                return 0
-              fi
-            fi
-
-            local kernel_symvers="$KERNEL_OUT/Module.symvers"
-            local symvers_list="$kernel_symvers"
-            for sv in $extra_symvers; do
-              if [ -n "$sv" ] && [ -f "$sv" ]; then symvers_list="$symvers_list $sv"; fi
-            done
-
-            KBUILD_EXTRA_SYMBOLS="$symvers_list" make -C "$PWD" O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" WERROR="$WERROR" M="$(realpath "$mod_dir")" KCFLAGS="$KCFLAGS" $extra_vars -j"$(nproc)" modules
-          }
-
-          met_drv_dir="../vendor/mediatek/kernel_modules/met_drv/4.14"
-          common_dir="../vendor/mediatek/kernel_modules/connectivity/common"
-          bt_dir="../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx"
-          wlan_adaptor_dir="../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor"
-          wlan_core_dir="../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m"
-
-          build_module "$met_drv_dir" "" "CONFIG_KERVER_VERSION=4.14" "1"
-          met_drv_symvers="$(realpath "$met_drv_dir/Module.symvers" 2>/dev/null || true)"
-
-          build_module "$common_dir" "$met_drv_symvers"
-          common_symvers="$(realpath "$common_dir/Module.symvers" 2>/dev/null || true)"
-
-          build_module "$bt_dir" "$common_symvers $met_drv_symvers"
-          bt_symvers="$(realpath "$bt_dir/Module.symvers" 2>/dev/null || true)"
-
-          build_module "$wlan_adaptor_dir" "$common_symvers $met_drv_symvers $bt_symvers"
-          adaptor_symvers="$(realpath "$wlan_adaptor_dir/Module.symvers" 2>/dev/null || true)"
-
-          build_module "$wlan_core_dir" "$common_symvers $met_drv_symvers $bt_symvers $adaptor_symvers" "MODULE_NAME=wlan_drv_gen4m"
-
-      - name: Strip debug symbols from all .ko files
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          find "$KBUILD_OUTPUT" \
-               "../vendor/mediatek/kernel_modules/met_drv/4.14" \
-               "../vendor/mediatek/kernel_modules/connectivity/common" \
-               "../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx" \
-               "../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor" \
-               "../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m" \
-               -name "*.ko" 2>/dev/null | xargs -r "${CROSS_COMPILE}strip" --strip-debug
-
-      - name: List generated artifacts
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          set -euo pipefail
-          ls -lh "$KBUILD_OUTPUT/arch/arm64/boot/" || true
-          find "$KBUILD_OUTPUT" -name "*.ko" | head -n 200 || true
-          find "../vendor/mediatek/kernel_modules" -name "*.ko" || true
-
-      - name: Upload kernel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-4.14-arm64-a05ba_defconfig
-          path: |
-            kernel-4.14/out/arch/arm64/boot/Image.gz
-            kernel-4.14/out/arch/arm64/boot/Image
-            kernel-4.14/out/arch/arm64/boot/dts/**/*.dtb
-            kernel-4.14/out/.config
-            kernel-4.14/out/System.map
-            kernel-4.14/out/vmlinux
-            kernel-4.14/out/**/*.ko
-            vendor/mediatek/kernel_modules/met_drv/4.14/*.ko
-            vendor/mediatek/kernel_modules/met_drv/4.14/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/common/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/bt/mt66xx/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/**/*.ko
-          retention-days: 30
-          compression-level: 6
-          include-hidden-files: true
-
-      - name: Upload artifacts to Release
-        uses: softprops/action-gh-release@v2
-        if: github.event_name != 'pull_request'
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: "Kernel Build - ${{ github.run_number }}"
-          draft: false
-          prerelease: false
-          files: |
-            kernel-4.14/out/arch/arm64/boot/Image.gz
-            kernel-4.14/out/arch/arm64/boot/Image
-            kernel-4.14/out/arch/arm64/boot/dts/**/*.dtb
-            kernel-4.14/out/.config
-            kernel-4.14/out/System.map
-            kernel-4.14/out/vmlinux
-            kernel-4.14/out/**/*.ko
-            vendor/mediatek/kernel_modules/met_drv/4.14/*.ko
-            vendor/mediatek/kernel_modules/met_drv/4.14/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/common/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/bt/mt66xx/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/**/*.ko
-            vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/**/*.ko
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-kernel-4.14
-          path: |
-            kernel-4.14/out/.config
-            kernel-4.14/out/.config.old
-            kernel-4.14/out/.config.bak
-          if-no-files-found: warn
-          include-hidden-files: true
-          retention-days: 14
-
-      - name: Build summary
-        if: always()
-        run: echo "Kernel + vendor modules build completed (arm64, a05ba_defconfig)"
+    - name: Upload build output
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: ./output
