@@ -65,22 +65,51 @@ jobs:
           mkdir -p "$KBUILD_OUTPUT"
           make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" "$DEFCONFIG"
 
-      - name: Disable broken connmark configs
+      - name: Patch xt_connmark.h with missing v1 API definitions
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -euo pipefail
-          # xt_connmark.c は v1 API (xt_connmark_tginfo1 / XT_CONNMARK_SET /
-          # xt_connmark_mtinfo1 等) を使用しているが、このツリーの
-          # include/uapi/linux/netfilter/xt_connmark.h には v1 定義が
-          # 含まれていないためコンパイルエラーとなる。
-          # CONNMARK target / match は本CIの用途(ブラウザ端末向けカーネル)
-          # には不要のため、該当コンフィグを無効化してビルドを回避する。
-          "$PWD/scripts/config" --file "$KBUILD_OUTPUT/.config" \
-            --disable NETFILTER_XT_TARGET_CONNMARK \
-            --disable NETFILTER_XT_MATCH_CONNMARK
-          # 無効化後の.configを依存関係に沿って正規化
-          make O="$KBUILD_OUTPUT" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" \
-            TOP="$TOP" MTK_PLATFORM="$MTK_PLATFORM" WERROR="$WERROR" olddefconfig
+          patched=0
+          for header in include/uapi/linux/netfilter/xt_connmark.h include/linux/netfilter/xt_connmark.h; do
+            if [ ! -f "$header" ]; then continue; fi
+            if grep -q 'xt_connmark_tginfo1' "$header"; then
+              echo "$header: already has v1 API, skipping"
+              patched=1
+              continue
+            fi
+            echo "Patching $header"
+            cat >> "$header" << 'EOF'
+          #ifndef XT_CONNMARK_V1_API_DEFINED
+          #define XT_CONNMARK_V1_API_DEFINED
+          enum {
+              XT_CONNMARK_SET = 0,
+              XT_CONNMARK_SAVE,
+              XT_CONNMARK_RESTORE
+          };
+          enum {
+              XT_CONNMARK_VALUE = 0,
+              XT_CONNMARK_MARK = 1
+          };
+          struct xt_connmark_tginfo1 {
+              __u32 ctmark, ctmask, nfmask;
+              __u8 mode;
+          };
+          struct xt_connmark_tginfo2 {
+              __u32 ctmark, ctmask, nfmask;
+              __u8 mode, invert;
+          };
+          struct xt_connmark_mtinfo1 {
+              __u32 mark, mask;
+              __u8 invert;
+          };
+          #endif
+          EOF
+            patched=1
+          done
+          if [ "$patched" -eq 0 ]; then
+            echo "Error: no xt_connmark.h file found to patch"
+            exit 1
+          fi
 
       - name: Fix DTC yylloc multiple definition
         working-directory: ${{ env.KERNEL_DIR }}
